@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_DATABASE: laravel_tests
+          MYSQL_ALLOW_EMPTY_PASSWORD: true
+        ports:
+          - 3306/tcp
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: xdebug
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Copy .env
+        run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+      - name: Install dependencies
+        run: composer install --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist -vvv
+
+      - name: Generate key
+        run: php artisan key:generate
+
+      - name: Setup permissions
+        run: chmod -R 777 storage bootstrap/cache
+
+      - name: Run checks
+        run: php artisan ci:run
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: ${{ job.services.mysql.ports[3306] }}
+          DB_PASSWORD: ""
+
+      - name: Make annotations
+        if: ${{ failure() }}
+        uses: satackey/action-js-inline@v0.0.2
+        with:
+          script: |
+            const fs = require('fs').promises
+            const core = require('@actions/core')
+
+            const errors = JSON.parse(await fs.readFile('./.github/ci-report.json', { encoding: 'utf8' }));
+
+            for (const error of errors) {
+              core.error(error.message, {file: error.file, startLine: error.line})
+            }
+
+  pint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: xdebug
+
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Require pint
+        run: composer require laravel/pint --dev --no-interaction
+
+      - name: Execute pint
+        run: vendor/bin/pint
+
+      - name: Commit
+        uses: EndBug/add-and-commit@v5
+        with:
+          message: Formatting
+
+  deploy:
+    needs: [checks]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+
+      - name: Deploy merge
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: fjogeleit/http-request-action@master
+        with:
+          url: "https://deployer.rockero.cz/deploy/${{ github.event.repository.name }}/pull/${{ github.event.pull_request.number }}"
+          method: "POST"
+          bearerToken: ${{ secrets.DEPLOYER_TOKEN }}
+          timeout: 600000
+
+      - name: Deploy branch
+        if: ${{ github.event_name == 'push' }}
+        uses: fjogeleit/http-request-action@master
+        with:
+          url: "https://deployer.rockero.cz/deploy/${{ github.event.repository.name }}/${{ github.ref_name }}"
+          method: "POST"
+          bearerToken: ${{ secrets.DEPLOYER_TOKEN }}
+          timeout: 600000
