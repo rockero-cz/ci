@@ -17,7 +17,7 @@
     ],
     "require": {
         "php": "^8.1",
-        "rockero-cz/laravel-linter": "dev-main",
+        "rockero-cz/laravel-linter": "^1.0.0",
         "spatie/laravel-package-tools": "^1.13.0"
     },
     "require-dev": {
