@@ -1,0 +1,4 @@
+{
+    "min_test_coverage": 70.0,
+    "phpstan_level": 5
+}
